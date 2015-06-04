@@ -1,0 +1,319 @@
+#!/bin/bash
+# mod-htaccess is a script to chattr or unchattr htaccess files on a cpanel server
+
+# Regex check for numbers as choices
+NC='^[0-9]+$'
+
+# Colors trailing text Red
+RED () {
+tput bold
+tput setaf 1
+}
+
+# Colors trailing text Green
+GREEN () {
+tput bold
+tput setaf 2
+}
+
+# Colors trailing text Yellow
+YELLOW () {
+tput bold
+tput setaf 3
+}
+
+# Colors trailing text Blue
+BLUE () {
+tput bold
+tput setaf 4
+}
+
+# Clears any preceding text color declarations
+WHITE () {
+tput sgr0
+}
+
+# Simple divider
+SEPARATOR () {
+echo
+BLUE
+echo "============================================================================"
+echo
+WHITE
+}
+
+
+if [ "$(id -u)" != "0" ]; then
+    clear
+    HEADER
+    RED
+    printf "\n\n"
+    echo "--------"
+    echo "WARNING!"
+    echo "--------"
+    echo
+    YELLOW
+    echo "mod-htaccess must be run as root"
+    echo
+    WHITE
+    echo "(Exiting now...)"
+    printf "\n\n"
+    exit 1
+fi
+
+# Creates uniform look during script execution when called after any clear command
+HEADER () {
+echo
+GREEN
+echo "============================================================================"
+WHITE
+echo "  mod-htaccess"
+GREEN
+echo "============================================================================"
+WHITE
+printf "\n\n"
+}
+
+# Clears $ amount of lines when called
+CLEARLINE () {
+# To use, set CLINES=<$#> before function if you need to clear more than 1 line
+if [ -z "$CLINES" ]; then
+    tput cuu 1 && tput el
+else
+    tput cuu "$CLINES" && tput el
+    unset CLINES
+fi
+}
+
+GET_INSTRUCTIONS () {
+clear
+HEADER
+GREEN
+echo "Please choose mod-htaccess target:"
+printf "\n\n"
+printf " 1) "
+WHITE
+echo "Single Account"
+echo
+GREEN
+printf " 2) "
+WHITE
+echo "All Accounts"
+printf "\n\n"
+echo -n "[enter selection]:"
+read TARGET
+case $TARGET in
+    1) SINGLE_FLAG=YES
+        SINGLE;;
+    2) SINGLE_FLAG=NO
+        ALL;;
+    *) clear
+        HEADER
+        RED
+        echo "Invalid Selection"
+        WHITE
+        echo
+        echo "Restarting..."
+        sleep 2
+        GET_INSTRUCTIONS;;
+esac
+}
+
+SINGLE () {
+clear
+HEADER
+GREEN
+echo "Generating target accounts list..."
+sleep 1
+CLEARLINE
+SEPARATOR
+WHITE
+grep ':' /etc/userdomains | grep -v nobody | awk '{print $1}' | cut -d ':' -f 1 | sort > domainlist
+# Sed command to add line numbers to the list of available domains/subdomains
+sed = domainlist | sed 'N;s/\n/\t/' > domainchoices
+cat domainchoices
+SEPARATOR
+echo
+# Giving them a quick out
+echo -n "Select mod-htaccess target [q for quit]: "
+read DOMAIN_TARGET
+if [ "$DOMAIN_TARGET" = "Q" ] || [ "$DOMAIN_TARGET" = "q" ]; then
+    printf "\n\n"
+    RED
+    echo "Quiting..."
+    rm -rf domainlist domainchoices
+    WHITE
+    sleep 1
+    clear
+    printf "\n\n\n"
+else
+    # Loop the script if an invalid choice is given
+    if ! [[ $DOMAIN_TARGET =~ $NC ]]; then
+        clear
+        HEADER
+        echo
+        RED
+        echo "\"$DOMAIN_TARGET\" is not a valid selection."
+        echo
+        WHITE
+        echo "Restarting..."
+        unset DOMAIN_TARGET
+        SINGLE
+    else
+        # Setting 1st match (-m 1) ensures $ doesn't confuse grep when there's also $$, $$$, $$$$, etc
+        TARGET="$(grep -m 1 "$DOMAIN_TARGET" domainchoices | awk '{print $2}')"
+        rm -rf domainlist domainchoices
+        MOD
+    fi
+fi
+}
+
+ALL () {
+clear
+HEADER
+GREEN
+echo "All accounts chosen"
+sleep 1
+MOD
+}
+
+MOD () {
+clear
+HEADER
+GREEN
+if [ $SINGLE_FLAG = YES ]; then
+        echo "Please choose the mod-htaccess operation for $TARGET:"
+else
+        echo "Please choose the mod-htaccess operation:"
+fi
+printf "\n\n"
+printf " 1) "
+WHITE
+echo "Enable htaccess chattr"
+GREEN
+echo
+printf " 2) "
+WHITE
+echo "Disable htaccess chattr"
+printf "\n\n"
+echo -n "[enter selection]:"
+read OPERATION
+case $OPERATION in
+    1) ENABLE;;
+    2) DISABLE;;
+    *) clear
+        HEADER
+        RED
+        echo "Invalid Selection"
+        WHITE
+        echo
+        echo "Restarting..."
+        sleep 2
+        MOD;;
+esac
+}
+
+ENABLE () {
+clear
+HEADER
+if [ "$SINGLE_FLAG" = "YES" ]; then
+        TARGET_PATH="$(grep -A 2 "$TARGET" /usr/local/apache/conf/httpd.conf | grep Document | awk '{print $2}' | head -1)"/
+        if [ -f "$TARGET_PATH".htaccess ]; then
+                chattr +i "$TARGET_PATH".htaccess
+                WHITE
+                echo "Enabled chattr in .htaccess file for $TARGET_PATH"
+                printf "\n\n\n"
+	echo "Done"
+	GREEN
+	echo "----"
+	WHITE
+	printf "\n\n"
+        else
+                WHITE
+                echo "No .htaccess file found in $TARGET_PATH"
+                printf "\n\n\n"
+	echo "Done"
+	GREEN
+	echo "----"
+	WHITE
+	printf "\n\n"
+        fi
+else
+        for TARGET in $(grep ':' /etc/userdomains | grep -v nobody | grep -v apache | awk '{print $1}' | cut -d ':' -f 1 | sort); do
+                TARGET_PATH="$(grep -A 2 "$TARGET" /usr/local/apache/conf/httpd.conf | grep Document | awk '{print $2}' | head -1 | grep -v htdocs)"/
+                if [ -f "$TARGET_PATH".htaccess ]; then
+                        chattr +i "$TARGET_PATH".htaccess
+                        WHITE
+                        echo "Enabled chattr in .htaccess file for $TARGET_PATH"
+                        printf "\n\n"
+                        SEPARATOR
+                else
+                        WHITE
+                        echo "No .htaccess file found in $TARGET_PATH"
+                        echo "skipping..."
+                        printf "\n\n"
+                        SEPARATOR
+                fi
+                printf "\n\n"
+        done
+echo "Done"
+GREEN
+echo "----"
+WHITE
+printf "\n\n"
+fi
+}
+
+DISABLE () {
+clear
+HEADER
+if [ "$SINGLE_FLAG" = "YES" ]; then
+        TARGET_PATH="$(grep -A 2 "$TARGET" /usr/local/apache/conf/httpd.conf | grep Document | awk '{print $2}' | head -1)"/
+        if [ -f "$TARGET_PATH".htaccess ]; then
+                chattr -i "$TARGET_PATH".htaccess
+                WHITE
+                echo "Disabled chattr in .htaccess file for $TARGET_PATH"
+                printf "\n\n\n"
+	echo "Done"
+	GREEN
+	echo "----"
+	WHITE
+	printf "\n\n"
+        else
+                WHITE
+                echo "No .htaccess file found in $TARGET_PATH"
+                printf "\n\n\n"
+	echo "Done"
+	GREEN
+	echo "----"
+	WHITE
+	printf "\n\n"
+        fi
+else
+        for TARGET in $(grep ':' /etc/userdomains | grep -v nobody | awk '{print $1}' | cut -d ':' -f 1 | sort); do
+                TARGET_PATH="$(grep -A 2 "$TARGET" /usr/local/apache/conf/httpd.conf | grep Document | awk '{print $2}' | head -1 | grep -v htdocs)"/
+                if [ -f "$TARGET_PATH".htaccess ]; then
+                        chattr -i "$TARGET_PATH".htaccess
+                        WHITE
+                        echo "Disabled chattr in .htaccess file for $TARGET_PATH"
+                        printf "\n\n"
+                        SEPARATOR
+                else
+                        WHITE
+                        echo "No .htaccess file found in $TARGET_PATH"
+                        echo "skipping..."
+                        printf "\n\n"
+                        SEPARATOR
+                fi
+                printf "\n\n"
+        done
+echo "Done"
+GREEN
+echo "----"
+WHITE
+printf "\n\n"
+fi
+}
+
+GET_INSTRUCTIONS
+exit 0
